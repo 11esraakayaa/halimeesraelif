@@ -1,0 +1,179 @@
+
+import React, { us
+import Web3 from 'web3';
+import HayvanKorumaPlaniABI from './HayvanKorumaPlaniABI.json';
+
+function HayvanKorumaUygulamasi() {
+    const [web3, setWeb3] = useState(null);
+    const [hesap, setHesap] = useState('');
+    const [sozlesme, setSozlesme] = useState(null);
+    const [hayvanlar, setHayvanlar] = useState([]);
+    const [yeniHayvan, setYeniHayvan] = useState({
+        isim: '',
+        tur: '',
+        yas: 0,
+        saglikDurumu: ''
+    });
+
+    // Web3 ve sözleşme bağlantısını başlatma
+    useEffect(() => {
+        async function web3Yukle() {
+            if (window.ethereum) {
+                const web3Instance = new Web3(window.ethereum);
+                try {
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    setWeb3(web3Instance);
+                    
+                    const networkId = await web3Instance.eth.net.getId();
+                    const deployedNetwork = HayvanKorumaPlaniABI.networks[networkId];
+                    const sozlesmeInstance = new web3Instance.eth.Contract(
+                        HayvanKorumaPlaniABI.abi,
+                        deployedNetwork && deployedNetwork.address
+                    );
+                    
+                    setSozlesme(sozlesmeInstance);
+                    
+                    const hesaplar = await web3Instance.eth.getAccounts();
+                    setHesap(hesaplar[0]);
+                } catch (error) {
+                    console.error("Bağlantı hatası:", error);
+                }
+            }
+        }
+        web3Yukle();
+    }, []);
+
+    // Hayvanları listeleme
+    const hayvanListele = async () => {
+        if (!sozlesme) return;
+
+        const toplamHayvanSayisi = await sozlesme.methods.toplamHayvanSayisi().call();
+        const hayvanListesi = [];
+
+        for (let i = 1; i <= toplamHayvanSayisi; i++) {
+            const hayvan = await sozlesme.methods.hayvanBilgisiAl(i).call();
+            hayvanListesi.push(hayvan);
+        }
+
+        setHayvanlar(hayvanListesi);
+    };
+
+    // Yeni hayvan ekleme
+    const hayvanEkle = async (e) => {
+        e.preventDefault();
+        try {
+            await sozlesme.methods.hayvanEkle(
+                yeniHayvan.isim, 
+                yeniHayvan.tur, 
+                yeniHayvan.yas, 
+                yeniHayvan.saglikDurumu
+            ).send({ from: hesap });
+
+            // Formu sıfırla
+            setYeniHayvan({
+                isim: '',
+                tur: '',
+                yas: 0,
+                saglikDurumu: ''
+            });
+
+            // Hayvan listesini güncelle
+            hayvanListele();
+        } catch (error) {
+            console.error("Hayvan ekleme hatası:", error);
+        }
+    };
+
+    // Hayvan sahiplendirme
+    const hayvanSahiplen = async (hayvanId) => {
+        try {
+            await sozlesme.methods.hayvanSahiplen(hayvanId).send({ 
+                from: hesap, 
+                value: web3.utils.toWei('0.1', 'ether') 
+            });
+            hayvanListele();
+        } catch (error) {
+            console.error("Sahiplendirme hatası:", error);
+        }
+    };
+
+    // Hayvan için destek verme
+    const hayvanDestekle = async (hayvanId, miktar) => {
+        try {
+            await sozlesme.methods.hayvanDestekle(hayvanId).send({ 
+                from: hesap, 
+                value: web3.utils.toWei(miktar.toString(), 'ether') 
+            });
+            hayvanListele();
+        } catch (error) {
+            console.error("Destek verme hatası:", error);
+        }
+    };
+
+    return (
+        <div className="container">
+            <h1>Web3 Hayvan Koruma Platformu</h1>
+            
+            {/* Yeni Hayvan Ekleme Formu */}
+            <form onSubmit={hayvanEkle}>
+                <input 
+                    type="text" 
+                    placeholder="Hayvan İsmi" 
+                    value={yeniHayvan.isim}
+                    onChange={(e) => setYeniHayvan({...yeniHayvan, isim: e.target.value})}
+                    required 
+                />
+                <input 
+                    type="text" 
+                    placeholder="Hayvan Türü" 
+                    value={yeniHayvan.tur}
+                    onChange={(e) => setYeniHayvan({...yeniHayvan, tur: e.target.value})}
+                    required 
+                />
+                <input 
+                    type="number" 
+                    placeholder="Yaş" 
+                    value={yeniHayvan.yas}
+                    onChange={(e) => setYeniHayvan({...yeniHayvan, yas: e.target.value})}
+                    required 
+                />
+                <input 
+                    type="text" 
+                    placeholder="Sağlık Durumu" 
+                    value={yeniHayvan.saglikDurumu}
+                    onChange={(e) => setYeniHayvan({...yeniHayvan, saglikDurumu: e.target.value})}
+                    required 
+                />
+                <button type="submit">Hayvan Ekle</button>
+            </form>
+
+            {/* Hayvan Listesi */}
+            <div className="hayvan-listesi">
+                {hayvanlar.map((hayvan) => (
+                    <div key={hayvan.id} className="hayvan-karti">
+                        <h3>{hayvan.isim}</h3>
+                        <p>Tür: {hayvan.tur}</p>
+                        <p>Yaş: {hayvan.yas}</p>
+                        <p>Sağlık Durumu: {hayvan.saglikDurumu}</p>
+                        <p>Toplam Destek: {web3.utils.fromWei(hayvan.destekMiktari, 'ether')} ETH</p>
+                        
+                        {!hayvan.sahiplendirildiMi ? (
+                            <>
+                                <button onClick={() => hayvanSahiplen(hayvan.id)}>
+                                    Sahiplen (0.1 ETH)
+                                </button>
+                                <button onClick={() => hayvanDestekle(hayvan.id, 0.01)}>
+                                    1 Cent Destek Ver
+                                </button>
+                            </>
+                        ) : (
+                            <p>Sahiplendirildi</p>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+export default HayvanKorumaUygulamasi;
